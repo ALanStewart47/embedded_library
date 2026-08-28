@@ -16,4 +16,11 @@
  *****************************************************************************/
 #ifndef __TWO_POINT_LINEAR_CALIBRATION_H__
 #define __TWO_POINT_LINEAR_CALIBRATION_H__
+//******************************** Includes *********************************//
+#include "stdint.h"
+//******************************** Includes *********************************//
+
+uint16_t adc_raw_to_twopoint_calibrated_u16(uint16_t raw, uint8_t channel, uint8_t cal_mode);
+
+#endif
 
