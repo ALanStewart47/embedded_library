@@ -1,0 +1,26 @@
+#ifndef __BOOTLOADER_CONFIG_H
+#define __BOOTLOADER_CONFIG_H
+
+#ifndef BOOTLOADER_ENABLE_USART1
+#define BOOTLOADER_ENABLE_USART1        1
+#endif
+
+#ifndef BOOTLOADER_ENABLE_USART2
+#define BOOTLOADER_ENABLE_USART2        1
+#endif
+
+#ifndef BOOTLOADER_ENABLE_USART3
+#define BOOTLOADER_ENABLE_USART3        1
+#endif
+
+#if !(BOOTLOADER_ENABLE_USART1) && \
+    !(BOOTLOADER_ENABLE_USART2) && \
+    !(BOOTLOADER_ENABLE_USART3)
+#error "At least one Bootloader USART must be enabled"
+#endif
+
+#ifndef BOOTLOADER_ENABLE_GOWIN_FPGA
+#define BOOTLOADER_ENABLE_GOWIN_FPGA    0
+#endif
+
+#endif /* __BOOTLOADER_CONFIG_H */

@@ -32,33 +32,54 @@
 #define BOOT_WAIT_TIME               2000U
 
 typedef void (*pFunction)(void);
-pFunction JumpToApplication;
-uint32_t JumpAddress;
-
-unsigned char urat_tx_buffer[100] = {0};
-unsigned char urat_tx_length = 0;
-
-unsigned int rx_length;
-unsigned char rx_buffer[BUFFER_SIZE];
-unsigned char rx_endFlag;
 
 unsigned char need_to_upgrade = 1;
 unsigned int package_sum = 0;
 unsigned char upgrade_bin_flag = 0;
 unsigned char success_flag = 0;
 
+#if BOOTLOADER_ENABLE_USART1
 extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart2;
-extern UART_HandleTypeDef huart3;
-extern UART_HandleTypeDef huart4;
 extern DMA_HandleTypeDef hdma_usart1_rx;
+#endif
+#if BOOTLOADER_ENABLE_USART2
+extern UART_HandleTypeDef huart2;
 extern DMA_HandleTypeDef hdma_usart2_rx;
+#endif
+#if BOOTLOADER_ENABLE_USART3
+extern UART_HandleTypeDef huart3;
 extern DMA_HandleTypeDef hdma_usart3_rx;
-extern DMA_HandleTypeDef hdma_uart4_rx;
+#endif
 
-unsigned int dma_ms = 0;
-unsigned int dma_ms_flag = 0;
-unsigned char dma_number = 1;
+#define BOOT_UART_TX_BUFFER_SIZE    10U
+
+typedef struct
+{
+    uint8_t number;
+    UART_HandleTypeDef *huart;
+    DMA_HandleTypeDef *hdma_rx;
+    volatile uint16_t rx_length;
+    volatile uint8_t rx_ready;
+    uint8_t rx_buffer[BUFFER_SIZE];
+    uint8_t tx_buffer[BOOT_UART_TX_BUFFER_SIZE];
+} boot_uart_context_t;
+
+static boot_uart_context_t boot_uarts[] =
+{
+#if BOOTLOADER_ENABLE_USART1
+    {1U, &huart1, &hdma_usart1_rx, 0U, 0U, {0}, {0}},
+#endif
+#if BOOTLOADER_ENABLE_USART2
+    {2U, &huart2, &hdma_usart2_rx, 0U, 0U, {0}, {0}},
+#endif
+#if BOOTLOADER_ENABLE_USART3
+    {3U, &huart3, &hdma_usart3_rx, 0U, 0U, {0}, {0}},
+#endif
+};
+
+#define BOOT_UART_COUNT ((uint8_t)(sizeof(boot_uarts) / sizeof(boot_uarts[0])))
+
+static boot_uart_context_t *active_uart = NULL;
 
 FLASH_EraseInitTypeDef My_Flash;
 uint32_t PageError = 0;
@@ -119,7 +140,9 @@ void my_gpio_init(void);
 void fpga_update_task(void);
 void program_internal_flash(uint16_t cnt_num);
 #endif
-void uart_data_handle(void);
+static void boot_uart_poll_mcu(void);
+static void uart_data_handle(boot_uart_context_t *uart);
+static void my_memset(unsigned char *dest, unsigned char set, uint16_t len);
 
 uint32_t GetFlashPageSize(void)
 {
@@ -260,27 +283,22 @@ void delay_us(uint32_t delay_us)
 }
 #endif
 
-void delay_ms(unsigned int time)
-{
-    unsigned int i = 0;
-
-    while(time--)
-    {
-        i = 12000;
-        while(i--);
-    }
-}
-
 void poweron_to_app(void)
 {
     uint32_t i;
+    uint8_t uart_index;
+    uint32_t jump_address;
+    pFunction jump_to_application;
 
     if(((*(__IO uint32_t *)APPLICATION_ADDRESS_A) & 0x2FFE0000) == 0x20000000)
     {
         __disable_irq();
 
-        HAL_UART_DMAStop(&huart1);
-        HAL_UART_DeInit(&huart1);
+        for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
+        {
+            HAL_UART_Abort(boot_uarts[uart_index].huart);
+            HAL_UART_DeInit(boot_uarts[uart_index].huart);
+        }
 
         SysTick->CTRL = 0U;
         SysTick->LOAD = 0U;
@@ -294,14 +312,14 @@ void poweron_to_app(void)
 
         HAL_RCC_DeInit();
 
-        JumpAddress = *(__IO uint32_t *)(APPLICATION_ADDRESS_A + 4);
-        JumpToApplication = (pFunction)JumpAddress;
+        jump_address = *(__IO uint32_t *)(APPLICATION_ADDRESS_A + 4U);
+        jump_to_application = (pFunction)jump_address;
         SCB->VTOR = APPLICATION_ADDRESS_A;
         __DSB();
         __ISB();
         __set_MSP(*(__IO uint32_t *)APPLICATION_ADDRESS_A);
         __enable_irq();
-        JumpToApplication();
+        jump_to_application();
     }
 }
 
@@ -327,14 +345,11 @@ void poweron_self_check(void)
     start_time = HAL_GetTick();
     while((HAL_GetTick() - start_time) < BOOT_WAIT_TIME)
     {
-        if(rx_endFlag == 1)
+        boot_uart_poll_mcu();
+        if(upgrade_bin_flag == 1)
         {
-            uart_data_handle();
-            if(upgrade_bin_flag == 1)
-            {
-                need_to_upgrade = 1;
-                return;
-            }
+            need_to_upgrade = 1;
+            return;
         }
     }
 
@@ -342,179 +357,155 @@ void poweron_self_check(void)
     need_to_upgrade = 1;
 }
 
-void init_Uart_data(void)
+static boot_uart_context_t *boot_uart_find(uint8_t uart_number)
 {
-    uint16_t i;
+    uint8_t uart_index;
 
-    my_memset(urat_tx_buffer, 0, 100);
-    for(i = 0; i < BUFFER_SIZE; i++)
+    for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
     {
-        rx_buffer[i] = 0;
+        if(boot_uarts[uart_index].number == uart_number)
+        {
+            return &boot_uarts[uart_index];
+        }
     }
+
+    return NULL;
 }
 
-void UART_Receive_DMA(void)
+static void my_memset(unsigned char *dest, unsigned char set, uint16_t len)
 {
-    #if (URAT_NUMBER == 1)
-    HAL_UART_Receive_DMA(&huart1, rx_buffer, BUFFER_SIZE);
-    #endif
-    #if (URAT_NUMBER == 2)
-    HAL_UART_Receive_DMA(&huart2, rx_buffer, BUFFER_SIZE);
-    #endif
-    #if (URAT_NUMBER == 3)
-    HAL_UART_Receive_DMA(&huart3, rx_buffer, BUFFER_SIZE);
-    #endif
-    #if (URAT_NUMBER == 4)
-    HAL_UART_Receive_DMA(&huart4, rx_buffer, BUFFER_SIZE);
-    #endif
-}
-
-void boot_uart_config(void)
-{
-    #if (URAT_NUMBER == 1)
-    __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
-    #endif
-    #if (URAT_NUMBER == 2)
-    __HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
-    #endif
-    #if (URAT_NUMBER == 3)
-    __HAL_UART_ENABLE_IT(&huart3, UART_IT_IDLE);
-    #endif
-    #if (URAT_NUMBER == 4)
-    __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE);
-    #endif
-
-    init_Uart_data();
-    UART_Receive_DMA();
-}
-
-void DMA_Usart_Send(uint8_t *buf, uint8_t len)
-{
-    #if (URAT_NUMBER == 1)
-    HAL_UART_Transmit_DMA(&huart1, buf, len);
-    #endif
-    #if (URAT_NUMBER == 2)
-    HAL_UART_Transmit_DMA(&huart2, buf, len);
-    #endif
-    #if (URAT_NUMBER == 3)
-    HAL_UART_Transmit_DMA(&huart3, buf, len);
-    #endif
-    #if (URAT_NUMBER == 4)
-    HAL_UART_Transmit_DMA(&huart4, buf, len);
-    #endif
-}
-
-void uart_receive_number(unsigned char uart_number)
-{
-    dma_number = uart_number;
-    dma_ms_flag = 1;
-
-    if(dma_ms_flag == 1)
+    while(len != 0U)
     {
-        //delay_ms(3);
-        uart_receive(dma_number);
-        dma_ms_flag = 0;
-        dma_ms = 0;
-    }
-}
-
-#if (URAT_NUMBER == 1)
-void uart_receive(unsigned char uart_number)
-{
-    unsigned char recv_flag;
-    uint16_t numb;
-
-    recv_flag = __HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE);
-
-    if(recv_flag != 0)
-    {
-        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
-        HAL_UART_DMAStop(&huart1);
-
-        numb = __HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
-        rx_length = BUFFER_SIZE - numb;
-        rx_endFlag = 1;
-    }
-}
-#endif
-
-void uart_interrupt_handle(unsigned char uart_number)
-{
-    uart_receive_number(uart_number);
-}
-
-void my_memset(unsigned char *dest, unsigned char set, unsigned char len)
-{
-    unsigned char *pdest = dest;
-
-    while(len != 0)
-    {
-        *pdest++ = set;
+        *dest++ = set;
         len--;
     }
 }
 
-void ACK_cmd(void)
+static void boot_uart_start_receive(boot_uart_context_t *uart)
 {
-    urat_tx_buffer[0] = 0x72;
-    urat_tx_buffer[1] = 0x68;
-    urat_tx_buffer[2] = 0x01;
-    urat_tx_buffer[3] = 0x16;
-    urat_tx_length = 4;
-
-    DMA_Usart_Send(urat_tx_buffer, urat_tx_length);
+    uart->rx_length = 0U;
+    uart->rx_ready = 0U;
+    HAL_UART_Receive_DMA(uart->huart, uart->rx_buffer, BUFFER_SIZE);
 }
 
-void ACK2_cmd(void)
+static void boot_uart_release_frame(boot_uart_context_t *uart)
 {
-    urat_tx_buffer[0] = 0x72;
-    urat_tx_buffer[1] = 0x68;
-    urat_tx_buffer[2] = 0x02;
-    urat_tx_buffer[3] = 0x16;
-    urat_tx_length = 4;
-
-    DMA_Usart_Send(urat_tx_buffer, urat_tx_length);
+    my_memset(uart->rx_buffer, 0U, uart->rx_length);
+    boot_uart_start_receive(uart);
 }
 
-void ACK3_cmd(unsigned int uart_number)
+void boot_uart_config(void)
 {
-    urat_tx_buffer[0] = 0x72;
-    urat_tx_buffer[1] = 0x69;
-    urat_tx_buffer[2] = uart_number / 256;
-    urat_tx_buffer[3] = uart_number % 256;
-    urat_tx_buffer[4] = 0x16;
-    urat_tx_length = 5;
+    uint8_t uart_index;
 
-    DMA_Usart_Send(urat_tx_buffer, urat_tx_length);
-}
-
-void false_cmd(void)
-{
-    urat_tx_buffer[0] = 0x72;
-    urat_tx_buffer[1] = 0x68;
-    urat_tx_buffer[2] = 0x03;
-    urat_tx_buffer[3] = 0x16;
-    urat_tx_length = 4;
-
-    DMA_Usart_Send(urat_tx_buffer, urat_tx_length);
-}
-
-void BootLoaderCmd_handle(void)
-{
-    if((rx_length == 5) && (rx_buffer[0] == 0x72) &&
-       (rx_buffer[1] == 0x68) && (rx_buffer[4] == 0x16))
+    for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
     {
-        package_sum = rx_buffer[2] * 256 + rx_buffer[3];
-        upgrade_bin_flag = 1;
-        ACK2_cmd();
+        my_memset(boot_uarts[uart_index].rx_buffer, 0U, BUFFER_SIZE);
+        my_memset(boot_uarts[uart_index].tx_buffer, 0U,
+                  BOOT_UART_TX_BUFFER_SIZE);
+        __HAL_UART_ENABLE_IT(boot_uarts[uart_index].huart, UART_IT_IDLE);
+        boot_uart_start_receive(&boot_uarts[uart_index]);
+    }
+}
+
+static void boot_uart_send(boot_uart_context_t *uart, const uint8_t *data,
+                           uint8_t len)
+{
+    uint8_t i;
+
+    if((uart == NULL) || (data == NULL) ||
+       (len == 0U) || (len > BOOT_UART_TX_BUFFER_SIZE) ||
+       (uart->huart->gState != HAL_UART_STATE_READY))
+    {
+        return;
     }
 
-    if((rx_length >= 6) && (rx_buffer[0] == 0x72) &&
-       (rx_buffer[1] == 0x68) && (rx_buffer[2] == 0xaa) &&
-       (rx_buffer[rx_length - 1] == 0x16))
+    for(i = 0U; i < len; i++)
+    {
+        uart->tx_buffer[i] = data[i];
+    }
+
+    HAL_UART_Transmit_DMA(uart->huart, uart->tx_buffer, len);
+}
+
+void uart_interrupt_handle(uint8_t uart_number)
+{
+    boot_uart_context_t *uart;
+    uint16_t remaining;
+
+    uart = boot_uart_find(uart_number);
+    if((uart == NULL) || (uart->rx_ready != 0U) ||
+       (__HAL_UART_GET_FLAG(uart->huart, UART_FLAG_IDLE) == RESET))
+    {
+        return;
+    }
+
+    remaining = __HAL_DMA_GET_COUNTER(uart->hdma_rx);
+    __HAL_UART_CLEAR_IDLEFLAG(uart->huart);
+    HAL_UART_AbortReceive(uart->huart);
+
+    if(remaining <= BUFFER_SIZE)
+    {
+        uart->rx_length = (uint16_t)(BUFFER_SIZE - remaining);
+        uart->rx_ready = 1U;
+    }
+    else
+    {
+        boot_uart_start_receive(uart);
+    }
+}
+
+static void ACK_cmd(boot_uart_context_t *uart)
+{
+    static const uint8_t ack[] = {0x72U, 0x68U, 0x01U, 0x16U};
+
+    boot_uart_send(uart, ack, sizeof(ack));
+}
+
+static void ACK2_cmd(boot_uart_context_t *uart)
+{
+    static const uint8_t ack[] = {0x72U, 0x68U, 0x02U, 0x16U};
+
+    boot_uart_send(uart, ack, sizeof(ack));
+}
+
+static void ACK3_cmd(boot_uart_context_t *uart, uint16_t packet_number)
+{
+    uint8_t ack[5];
+
+    ack[0] = 0x72U;
+    ack[1] = 0x69U;
+    ack[2] = (uint8_t)(packet_number >> 8);
+    ack[3] = (uint8_t)packet_number;
+    ack[4] = 0x16U;
+    boot_uart_send(uart, ack, sizeof(ack));
+}
+
+static void false_cmd(boot_uart_context_t *uart)
+{
+    static const uint8_t nack[] = {0x72U, 0x68U, 0x03U, 0x16U};
+
+    boot_uart_send(uart, nack, sizeof(nack));
+}
+
+static void BootLoaderCmd_handle(boot_uart_context_t *uart)
+{
+    if((uart->rx_length == 5U) && (uart->rx_buffer[0] == 0x72U) &&
+       (uart->rx_buffer[1] == 0x68U) && (uart->rx_buffer[4] == 0x16U))
+    {
+        package_sum = (uint16_t)((uint16_t)uart->rx_buffer[2] * 256U +
+                                 uart->rx_buffer[3]);
+        upgrade_bin_flag = 1;
+        active_uart = uart;
+        ACK2_cmd(uart);
+    }
+
+    if((uart->rx_length >= 6U) && (uart->rx_buffer[0] == 0x72U) &&
+       (uart->rx_buffer[1] == 0x68U) && (uart->rx_buffer[2] == 0xaaU) &&
+       (uart->rx_buffer[uart->rx_length - 1U] == 0x16U))
     {
         upgrade_bin_flag = 0;
-        ACK_cmd();
+        ACK_cmd(uart);
     }
 }
 
@@ -534,45 +525,47 @@ void set_BootLoader_flag(void)
     }
 }
 
-void upgradeCmd_handle(void)
+static void upgradeCmd_handle(boot_uart_context_t *uart)
 {
     uint16_t i;
     uint16_t pack_numb;
     uint32_t write_address;
     unsigned char res = 0x00;
 
-    if((rx_length >= 6) && (rx_buffer[0] == 0x72) &&
-       (rx_buffer[1] == 0x68) && (rx_buffer[2] == 0xaa) &&
-       (rx_buffer[rx_length - 1] == 0x16))
+    if((uart->rx_length >= 6U) && (uart->rx_buffer[0] == 0x72U) &&
+       (uart->rx_buffer[1] == 0x68U) && (uart->rx_buffer[2] == 0xaaU) &&
+       (uart->rx_buffer[uart->rx_length - 1U] == 0x16U))
     {
         upgrade_bin_flag = 0;
-        ACK_cmd();
+        active_uart = NULL;
+        ACK_cmd(uart);
         return;
     }
 
-    if((rx_length != 262) || (rx_buffer[0] != 0x72) ||
-       (rx_buffer[1] != 0x69) || (rx_buffer[261] != 0x16))
+    if((uart->rx_length != 262U) || (uart->rx_buffer[0] != 0x72U) ||
+       (uart->rx_buffer[1] != 0x69U) || (uart->rx_buffer[261] != 0x16U))
     {
-        false_cmd();
+        false_cmd(uart);
         return;
     }
 
     for(i = 0; i < 256; i++)
     {
-        res ^= rx_buffer[i + 4];
+        res ^= uart->rx_buffer[i + 4U];
     }
 
-    if((res != rx_buffer[260]) || (flash_info_ok == 0U))
+    if((res != uart->rx_buffer[260]) || (flash_info_ok == 0U))
     {
-        false_cmd();
+        false_cmd(uart);
         success_flag = FALSE;
         return;
     }
 
-    pack_numb = rx_buffer[2] * 256 + rx_buffer[3];
+    pack_numb = (uint16_t)((uint16_t)uart->rx_buffer[2] * 256U +
+                           uart->rx_buffer[3]);
     if((pack_numb == 0) || (pack_numb > package_sum))
     {
-        false_cmd();
+        false_cmd(uart);
         success_flag = FALSE;
         return;
     }
@@ -581,7 +574,7 @@ void upgradeCmd_handle(void)
 
     if(FlashAddressCheck(write_address, 256U) == 0U)
     {
-        false_cmd();
+        false_cmd(uart);
         success_flag = FALSE;
         return;
     }
@@ -590,21 +583,21 @@ void upgradeCmd_handle(void)
     {
         if(EraseOnePage(write_address) == 0U)
         {
-            false_cmd();
+            false_cmd(uart);
             success_flag = FALSE;
             return;
         }
     }
 
-    if(WriteFlashData(write_address, &rx_buffer[4], 256) == 0U)
+    if(WriteFlashData(write_address, &uart->rx_buffer[4], 256U) == 0U)
     {
-        false_cmd();
+        false_cmd(uart);
         success_flag = FALSE;
         return;
     }
 
     pack_num = pack_numb;
-    ACK3_cmd(pack_num);
+    ACK3_cmd(uart, pack_num);
 
     if(pack_num == package_sum)
     {
@@ -619,25 +612,36 @@ void upgradeCmd_handle(void)
     }
 }
 
-void uart_data_handle(void)
+static void uart_data_handle(boot_uart_context_t *uart)
 {
-    if(rx_endFlag == 1)
+    if(uart->rx_ready != 0U)
     {
-        urat_tx_length = 0;
-
-        if(upgrade_bin_flag == 0)
+        if((active_uart != NULL) && (active_uart != uart))
         {
-            BootLoaderCmd_handle();
+            boot_uart_release_frame(uart);
+            return;
+        }
+
+        if(upgrade_bin_flag == 0U)
+        {
+            BootLoaderCmd_handle(uart);
         }
         else
         {
-            upgradeCmd_handle();
+            upgradeCmd_handle(uart);
         }
 
-        my_memset(rx_buffer, 0, (unsigned char)rx_length);
-        rx_length = 0;
-        rx_endFlag = 0;
-        UART_Receive_DMA();
+        boot_uart_release_frame(uart);
+    }
+}
+
+static void boot_uart_poll_mcu(void)
+{
+    uint8_t uart_index;
+
+    for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
+    {
+        uart_data_handle(&boot_uarts[uart_index]);
     }
 }
 
@@ -667,13 +671,16 @@ uint16_t modbus_crc(unsigned char *data, uint16_t len)
     return crc;
 }
 
-void fpga_send(unsigned char *data, unsigned char len)
+static void fpga_send(boot_uart_context_t *uart, unsigned char *data,
+                      unsigned char len)
 {
-    DMA_Usart_Send(data, len);
+    boot_uart_send(uart, data, len);
 }
 
-void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
+static void CMD_40_handle(boot_uart_context_t *uart)
 {
+    unsigned char *uart_buf = uart->rx_buffer;
+    unsigned int length = uart->rx_length;
     unsigned char tx_buf[10];
     unsigned char h = 0;
     uint16_t crc_temp;
@@ -702,7 +709,7 @@ void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
             tx_buf[h++] = 0x00;
         }
         tx_buf[h++] = 0xfb;
-        fpga_send(tx_buf, h);
+        fpga_send(uart, tx_buf, h);
         return;
     }
 
@@ -718,7 +725,7 @@ void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
         crc_temp = modbus_crc(tx_buf, h);
         tx_buf[h++] = crc_temp >> 8;
         tx_buf[h++] = crc_temp;
-        fpga_send(tx_buf, h);
+        fpga_send(uart, tx_buf, h);
         return;
     }
 
@@ -735,7 +742,7 @@ void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
         {
             tx_buf[h++] = 0x65;
         }
-        fpga_send(tx_buf, h);
+        fpga_send(uart, tx_buf, h);
         return;
     }
 
@@ -746,7 +753,7 @@ void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
                               ((uint32_t)uart_buf[3] << 8) +
                               uart_buf[4];
         tx_buf[h++] = (spi_w_handle.size_t == 0) ? 0x65 : 0x73;
-        fpga_send(tx_buf, h);
+        fpga_send(uart, tx_buf, h);
         if(spi_w_handle.size_t != 0)
         {
             spi_w_handle.up_cmd = 1;
@@ -776,23 +783,32 @@ void CMD_40_handle(unsigned char *uart_buf, unsigned int length)
             spi_w_handle.up_cmd = 2;
             tx_buf[h++] = 0x73;
         }
-        fpga_send(tx_buf, h);
+        fpga_send(uart, tx_buf, h);
     }
 }
 
 void fpga_update_task(void)
 {
+    uint8_t uart_index;
+
     spi_w_handle.up_cmd = 0;
     spi_w_handle.block_size_t = 0;
+    active_uart = NULL;
 
     while(1)
     {
-        if(rx_endFlag == 1)
+        for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
         {
-            CMD_40_handle(rx_buffer, rx_length);
-            rx_length = 0;
-            rx_endFlag = 0;
-            UART_Receive_DMA();
+            if(boot_uarts[uart_index].rx_ready != 0U)
+            {
+                if((active_uart == NULL) ||
+                   (active_uart == &boot_uarts[uart_index]))
+                {
+                    active_uart = &boot_uarts[uart_index];
+                    CMD_40_handle(active_uart);
+                }
+                boot_uart_release_frame(&boot_uarts[uart_index]);
+            }
         }
 
         if(spi_w_handle.up_cmd == 1)
@@ -817,7 +833,17 @@ void fpga_update_task(void)
 }
 #endif
 
-void uart_task(void)
+static void boot_uart_broadcast_ack(void)
+{
+    uint8_t uart_index;
+
+    for(uart_index = 0U; uart_index < BOOT_UART_COUNT; uart_index++)
+    {
+        ACK_cmd(&boot_uarts[uart_index]);
+    }
+}
+
+static void uart_task(void)
 {
     uint16_t data;
 
@@ -833,7 +859,7 @@ void uart_task(void)
     if(data == 0x00aa)
     {
         need_to_upgrade = 1;
-        ACK_cmd();
+        boot_uart_broadcast_ack();
     }
     else if(upgrade_bin_flag == 1)
     {
@@ -848,14 +874,21 @@ void uart_task(void)
     {
         if(need_to_upgrade == 1)
         {
-            uart_data_handle();
+            boot_uart_poll_mcu();
         }
 
         if(success_flag == FALSE)
         {
             success_flag = 0;
             need_to_upgrade = 1;
-            ACK_cmd();
+            if(active_uart != NULL)
+            {
+                ACK_cmd(active_uart);
+            }
+            else
+            {
+                boot_uart_broadcast_ack();
+            }
         }
     }
 }
@@ -864,10 +897,6 @@ void bsp_ota_handle(void)
 {
     HAL_Delay(100);
     uart_task();
-}
-
-void bsp_uart_baud_reinit(void)
-{
 }
 
 #if BOOTLOADER_ENABLE_GOWIN_FPGA
@@ -936,32 +965,6 @@ void jtag_configure(unsigned char instruction)
     jtag_state(UPDATE_IR);
     jtag_state(RUN_TEST_IDLE);
     delay_us(100);
-}
-
-uint32_t jtag_read_data(unsigned char width)
-{
-    uint32_t value = 0;
-    unsigned char bit;
-
-    jtag_state(SELECT_DR_SCAN);
-    jtag_state(CAPTURE_DR);
-    jtag_state(SHIFT_DR);
-
-    for(bit = 0; bit < width; bit++)
-    {
-        if(bit == (width - 1))
-        {
-            TMS_HIGH;
-        }
-
-        TCK_HIGH;
-        value = (value << 1) | READ_TDO();
-        TCK_LOW;
-    }
-
-    jtag_state(UPDATE_DR);
-    jtag_state(RUN_TEST_IDLE);
-    return value;
 }
 
 void jtag_shift_u32(uint32_t value)
