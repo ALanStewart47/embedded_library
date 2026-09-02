@@ -19,25 +19,28 @@
  *       1 tab == 4 spaces!
  *
  *****************************************************************************/
-//******************************** Includes *********************************//
 #include "bootloader.h"
-//******************************** Includes *********************************//
 
-//******************************** Defines **********************************//
-#define TURE                        1
-#define FALSE                       2
+/* File-wide constants */
+#define TURE                         1
+#define FALSE                        2
 
-#define STM32F103_FLASH_SIZE_ADDR   0x1FFFF7E0U
-#define STM32F103_FLASH_BASE        0x08000000U
+#define STM32F103_FLASH_SIZE_ADDR    0x1FFFF7E0U
+#define STM32F103_FLASH_BASE         0x08000000U
 #define BOOT_WAIT_TIME               2000U
+
+/* UART transport constants */
+#define BOOT_UART_TX_BUFFER_SIZE     10U
 
 typedef void (*pFunction)(void);
 
-unsigned char need_to_upgrade = 1;
-unsigned int package_sum = 0;
-unsigned char upgrade_bin_flag = 0;
-unsigned char success_flag = 0;
+/* Bootloader update state */
+unsigned char need_to_upgrade   = 1;
+unsigned int package_sum        = 0;
+unsigned char upgrade_bin_flag  = 0;
+unsigned char success_flag      = 0;
 
+/* Enabled UART handles and receive DMA channels */
 #if BOOTLOADER_ENABLE_USART1
 extern UART_HandleTypeDef huart1;
 extern DMA_HandleTypeDef hdma_usart1_rx;
@@ -51,8 +54,7 @@ extern UART_HandleTypeDef huart3;
 extern DMA_HandleTypeDef hdma_usart3_rx;
 #endif
 
-#define BOOT_UART_TX_BUFFER_SIZE    10U
-
+/* Per-UART DMA transport context */
 typedef struct
 {
     uint8_t number;
@@ -77,19 +79,22 @@ static boot_uart_context_t boot_uarts[] =
 #endif
 };
 
+/* Depends on boot_uarts[] and therefore remains immediately below it. */
 #define BOOT_UART_COUNT ((uint8_t)(sizeof(boot_uarts) / sizeof(boot_uarts[0])))
 
 static boot_uart_context_t *active_uart = NULL;
 
+/* Flash update state */
 FLASH_EraseInitTypeDef My_Flash;
-uint32_t PageError = 0;
-unsigned int pack_num = 0;
+uint32_t PageError          = 0;
+unsigned int pack_num       = 0;
 
-uint32_t flash_page_size = 0;
-uint32_t flash_end_address = 0;
+uint32_t flash_page_size    = 0;
+uint32_t flash_end_address  = 0;
 unsigned char flash_info_ok = 0;
 
 #if BOOTLOADER_ENABLE_GOWIN_FPGA
+/* FPGA update state */
 typedef struct
 {
     uint32_t addr;
@@ -115,6 +120,7 @@ typedef enum
     UPDATE_IR
 } TAPState;
 
+/* FPGA JTAG pin mapping */
 #define TMS_GPIO_Port               GPIOA
 #define TMS_Pin                     GPIO_PIN_4
 #define TCK_GPIO_Port               GPIOA
@@ -124,6 +130,7 @@ typedef enum
 #define TDO_GPIO_Port               GPIOA
 #define TDO_Pin                     GPIO_PIN_7
 
+/* FPGA JTAG pin operations */
 #define TCK_HIGH                    (TCK_GPIO_Port->BSRR = TCK_Pin)
 #define TCK_LOW                     (TCK_GPIO_Port->BSRR = (uint32_t)TCK_Pin << 16)
 #define TMS_HIGH                    (TMS_GPIO_Port->BSRR = TMS_Pin)
@@ -132,8 +139,8 @@ typedef enum
 #define TDI_LOW                     (TDI_GPIO_Port->BSRR = (uint32_t)TDI_Pin << 16)
 #define READ_TDO()                  (((TDO_GPIO_Port->IDR & TDO_Pin) != 0U) ? 1U : 0U)
 #endif
-//******************************** Defines **********************************//
 
+/* Private function declarations */
 #if BOOTLOADER_ENABLE_GOWIN_FPGA
 void delay_us(uint32_t delay_us);
 void my_gpio_init(void);
