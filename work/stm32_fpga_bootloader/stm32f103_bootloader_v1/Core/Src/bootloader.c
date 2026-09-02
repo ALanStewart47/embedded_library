@@ -42,19 +42,19 @@ unsigned char success_flag      = 0;
 
 /* Enabled UART handles and receive DMA channels */
 #if BOOTLOADER_ENABLE_USART1
-extern UART_HandleTypeDef huart1;
-extern DMA_HandleTypeDef hdma_usart1_rx;
+    extern UART_HandleTypeDef huart1;
+    extern DMA_HandleTypeDef hdma_usart1_rx;
 #endif
 #if BOOTLOADER_ENABLE_USART2
-extern UART_HandleTypeDef huart2;
-extern DMA_HandleTypeDef hdma_usart2_rx;
+    extern UART_HandleTypeDef huart2;
+    extern DMA_HandleTypeDef hdma_usart2_rx;
 #endif
 #if BOOTLOADER_ENABLE_USART3
-extern UART_HandleTypeDef huart3;
-extern DMA_HandleTypeDef hdma_usart3_rx;
+    extern UART_HandleTypeDef huart3;
+    extern DMA_HandleTypeDef hdma_usart3_rx;
 #endif
 
-/* Per-UART DMA transport context */
+/* UART DMA transport context */
 typedef struct
 {
     uint8_t number;
@@ -68,15 +68,15 @@ typedef struct
 
 static boot_uart_context_t boot_uarts[] =
 {
-#if BOOTLOADER_ENABLE_USART1
-    {1U, &huart1, &hdma_usart1_rx, 0U, 0U, {0}, {0}},
-#endif
-#if BOOTLOADER_ENABLE_USART2
-    {2U, &huart2, &hdma_usart2_rx, 0U, 0U, {0}, {0}},
-#endif
-#if BOOTLOADER_ENABLE_USART3
-    {3U, &huart3, &hdma_usart3_rx, 0U, 0U, {0}, {0}},
-#endif
+    #if BOOTLOADER_ENABLE_USART1
+        {1U, &huart1, &hdma_usart1_rx, 0U, 0U, {0}, {0}},
+    #endif
+    #if BOOTLOADER_ENABLE_USART2
+        {2U, &huart2, &hdma_usart2_rx, 0U, 0U, {0}, {0}},
+    #endif
+    #if BOOTLOADER_ENABLE_USART3
+        {3U, &huart3, &hdma_usart3_rx, 0U, 0U, {0}, {0}},
+    #endif
 };
 
 /* Depends on boot_uarts[] and therefore remains immediately below it. */
@@ -120,24 +120,24 @@ typedef enum
     UPDATE_IR
 } TAPState;
 
-/* FPGA JTAG pin mapping */
-#define TMS_GPIO_Port               GPIOA
-#define TMS_Pin                     GPIO_PIN_4
-#define TCK_GPIO_Port               GPIOA
-#define TCK_Pin                     GPIO_PIN_5
-#define TDI_GPIO_Port               GPIOA
-#define TDI_Pin                     GPIO_PIN_6
-#define TDO_GPIO_Port               GPIOA
-#define TDO_Pin                     GPIO_PIN_7
+/* FPGA JTAG pin */
+#define TMS_GPIO_Port           GPIOA
+#define TMS_Pin                 GPIO_PIN_4
+#define TCK_GPIO_Port           GPIOA
+#define TCK_Pin                 GPIO_PIN_5
+#define TDI_GPIO_Port           GPIOA
+#define TDI_Pin                 GPIO_PIN_6
+#define TDO_GPIO_Port           GPIOA
+#define TDO_Pin                 GPIO_PIN_7
 
-/* FPGA JTAG pin operations */
-#define TCK_HIGH                    (TCK_GPIO_Port->BSRR = TCK_Pin)
-#define TCK_LOW                     (TCK_GPIO_Port->BSRR = (uint32_t)TCK_Pin << 16)
-#define TMS_HIGH                    (TMS_GPIO_Port->BSRR = TMS_Pin)
-#define TMS_LOW                     (TMS_GPIO_Port->BSRR = (uint32_t)TMS_Pin << 16)
-#define TDI_HIGH                    (TDI_GPIO_Port->BSRR = TDI_Pin)
-#define TDI_LOW                     (TDI_GPIO_Port->BSRR = (uint32_t)TDI_Pin << 16)
-#define READ_TDO()                  (((TDO_GPIO_Port->IDR & TDO_Pin) != 0U) ? 1U : 0U)
+/* FPGA JTAG pin operation */
+#define TCK_HIGH                (TCK_GPIO_Port->BSRR = TCK_Pin)
+#define TCK_LOW                 (TCK_GPIO_Port->BSRR = (uint32_t)TCK_Pin << 16)
+#define TMS_HIGH                (TMS_GPIO_Port->BSRR = TMS_Pin)
+#define TMS_LOW                 (TMS_GPIO_Port->BSRR = (uint32_t)TMS_Pin << 16)
+#define TDI_HIGH                (TDI_GPIO_Port->BSRR = TDI_Pin)
+#define TDI_LOW                 (TDI_GPIO_Port->BSRR = (uint32_t)TDI_Pin << 16)
+#define READ_TDO()              (((TDO_GPIO_Port->IDR & TDO_Pin) != 0U) ? 1U : 0U)
 #endif
 
 /* Private function declarations */
