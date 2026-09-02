@@ -1,0 +1,7 @@
+{
+  "keil": {
+    "project": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP.uvprojx",
+    "target": "DSP",
+    "log_dir": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/.embeddedskills/build"
+  }
+}

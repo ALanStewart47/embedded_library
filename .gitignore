@@ -1,0 +1,65 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+.vscode/
+*.code-workspace
+
+# ---------------------------------------------------------------------------
+# Keil MDK — keep what another person needs to open and compile:
+#   *.uvprojx  project
+#   *.sct      scatter / linker script (often sits in the output folder)
+#   startup_*.s
+#   .c / .h / .ioc
+# ---------------------------------------------------------------------------
+
+# Build objects and listings (CubeMX puts these next to the .sct — do not
+# ignore the whole Target folder, or the scatter file disappears and link fails)
+*.o
+*.d
+*.crf
+*.lnp
+*.dep
+*.iex
+*.i
+*_2i
+*.l2p
+*.fed
+*.lst
+*.map
+*.Bak
+*.bak
+*.__i
+*.browse
+
+# Firmware images from MDK only (do not ignore *.bin at repo root — FPGA
+# bitstreams may use that extension)
+**/MDK-ARM/**/*.axf
+**/MDK-ARM/**/*.hex
+**/MDK-ARM/**/*.bin
+**/MDK-ARM/**/*.htm
+**/MDK-ARM/**/*.build_log.htm
+
+# Classic Keil output directories (when the project uses these names)
+Objects/
+Listings/
+
+# Per-user uVision UI — regenerates on open; not used by the compiler
+*.uvguix
+*.uvguix.*
+*.uvgui.*
+
+# Debugger / download personal files — not required to compile
+*.uvoptx
+DebugConfig/
+*.dbgconf
+JLinkLog.txt
+JLinkSettings.ini
+EventRecorderStub.scvd
+
+# CubeMX local cache — .ioc is kept so the project can be regenerated
+.mxproject
+
+# uVision log locks
+*.lock

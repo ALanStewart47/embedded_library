@@ -1,0 +1,26 @@
+{
+  "last_build": {
+    "provider": "keil",
+    "action": "rebuild",
+    "project": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP.uvprojx",
+    "target": "DSP",
+    "log_dir": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/.embeddedskills/build",
+    "artifacts": {
+      "axf_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.axf",
+      "hex_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.hex",
+      "bin_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/dsp.bin",
+      "flash_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.hex",
+      "debug_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.axf",
+      "output_dir": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP",
+      "log_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/.embeddedskills/build/DSP-DSP-rebuild.log"
+    },
+    "axf_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.axf",
+    "hex_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.hex",
+    "bin_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/dsp.bin",
+    "flash_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.hex",
+    "debug_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP/DSP.axf",
+    "output_dir": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/MDK-ARM/DSP",
+    "log_file": "work/stm32_fpga_bootloader/STM32F103_BootLoader_new_V1.0/.embeddedskills/build/DSP-DSP-rebuild.log",
+    "timestamp": "2026-09-02T09:05:36+08:00"
+  }
+}
