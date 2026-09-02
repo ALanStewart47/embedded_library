@@ -94,3 +94,28 @@
 ### 结论
 
 瘦身可以改善 12 KB 布局下的余量，但不应替代本交接文档前述的内存布局修复。尤其在有效链接范围尚未确认前，仍优先采用 `Bootloader 0x08000000 + 0x3800`、标志页 `0x08003C00`、APP 起始 `0x08004000` 的布局，并验证实际 Target 使用该范围。
+
+## 2026-09-02 后续进度：`stm32f103_bootloader_v1` 副本
+
+以下进度适用于 `work/stm32_fpga_bootloader/stm32f103_bootloader_v1`，不是对本目录原工程的覆盖或硬件验证结果。
+
+### 已完成
+
+- 已保存目标副本的初始源码基线：`134b7ae`。
+- 串口传输层已改为可同时支持 USART1、USART2、USART3；每路 UART 具有独立的 RX/TX DMA 上下文，升级会话通过活动端口隔离，回复从接收该命令的端口发出。
+- 新增 `Core/Inc/bootloader_config.h`：`BOOTLOADER_ENABLE_USART1/2/3` 可独立控制；三个端口同时关闭时编译报错。`BOOTLOADER_ENABLE_GOWIN_FPGA` 默认关闭，关闭时不编译 FPGA 升级代码；UART4 支持已移除。
+- 修复了 DMA 异步发送引用局部 TX 缓冲、`my_memset()` 长度为 8 位导致截断、RX 中断路径延时及停止全部 UART DMA 等问题。
+- 已补齐 USART2/USART3 的初始化、DMA/NVIC 和 IDLE IRQ 条件编译路径。
+- 已按依赖关系整理 `bootloader.c` 的定义、宏和注释；`BOOT_UART_COUNT` 保持在 `boot_uarts[]` 后，避免与其依赖关系分离。
+
+### 配置与提交
+
+- 多 UART 实现提交：`1437cd6 feat: add configurable multi-UART bootloader transport`。
+- 可读性整理提交：`6bf7e74 style: improve bootloader definition layout`。
+- 当前工作区配置为 USART1 默认启用、USART2/USART3 默认关闭；这只是默认配置，仍可通过 `bootloader_config.h` 的宏启用任意组合。
+
+### 验证状态
+
+- 已运行 `stm32f103_bootloader_v1/tests/check_bootloader_static.ps1`，25 项静态断言通过；同时完成条件编译配对和 Git 空白检查。
+- 按当前任务约定，**未执行** MDK/Keil 编译、map 容量检查、实机 UART DMA 测试、MCU 升级测试或 FPGA/JTAG 测试。
+- 本节不改变上文原工程关于链接范围、升级标志页和硬件回归的阻塞结论；对目标副本也应在实机验证前确认实际链接范围与 APP 地址布局。
