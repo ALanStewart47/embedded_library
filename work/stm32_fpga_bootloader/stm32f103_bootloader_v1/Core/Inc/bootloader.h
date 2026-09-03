@@ -24,7 +24,7 @@
  *       Configure enabled UART ports in bootloader_config.h.
  *       Enable one FPGA backend in bootloader_config.h when required.
  *       Default 0 is MCU-only and fits the current 12 KB Bootloader ROM.
- *       FPGA=1 currently overflows 0x3000; enlarge Bootloader IROM first.
+ *       Either FPGA backend fits 12 KB when enabled individually.
  *       The MDK Target preprocessor can also define it to override the default.
  *
  *****************************************************************************/
