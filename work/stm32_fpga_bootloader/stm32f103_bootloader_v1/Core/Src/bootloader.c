@@ -32,6 +32,46 @@
 /* UART transport constants */
 #define BOOT_UART_TX_BUFFER_SIZE     10U
 
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+/* Anlogic FPGA and external W25Q128 configuration */
+#define ANLOGIC_FLASH_BASE_ADDRESS   0x000C0000U
+#define ANLOGIC_FLASH_BLOCK_SIZE     (64U * 1024U)
+#define ANLOGIC_FLASH_BLOCK_COUNT    12U
+#define ANLOGIC_FLASH_MAX_SIZE       (ANLOGIC_FLASH_BLOCK_SIZE * \
+                                      ANLOGIC_FLASH_BLOCK_COUNT)
+#define ANLOGIC_FLASH_PAGE_SIZE      256U
+
+#ifndef ANLOGIC_CONTROL_DELAY_US
+#define ANLOGIC_CONTROL_DELAY_US     3U
+#endif
+#ifndef ANLOGIC_PAGE_TIMEOUT_MS
+#define ANLOGIC_PAGE_TIMEOUT_MS      100U
+#endif
+#ifndef ANLOGIC_BLOCK_TIMEOUT_MS
+#define ANLOGIC_BLOCK_TIMEOUT_MS     5000U
+#endif
+#ifndef ANLOGIC_RELOAD_RETRY_COUNT
+#define ANLOGIC_RELOAD_RETRY_COUNT   3U
+#endif
+
+#define ANLOGIC_W25Q_WRITE_ENABLE    0x06U
+#define ANLOGIC_W25Q_READ_DATA       0x03U
+#define ANLOGIC_W25Q_PAGE_PROGRAM    0x02U
+#define ANLOGIC_W25Q_READ_STATUS     0x05U
+#define ANLOGIC_W25Q_BLOCK_ERASE_64K 0xD8U
+#define ANLOGIC_W25Q_STATUS_WIP      0x01U
+
+/* W25Q128: PA0 CS, PA1 MOSI, PC13 SCK, PB9 MISO. */
+#define ANLOGIC_FLASH_CS_PIN         GPIO_PIN_0
+#define ANLOGIC_FLASH_MOSI_PIN       GPIO_PIN_1
+#define ANLOGIC_FLASH_SCK_PIN        GPIO_PIN_13
+#define ANLOGIC_FLASH_MISO_PIN       GPIO_PIN_9
+/* FPGA control: PC13 clock, PC14 reset, PC15 data, PD0 acknowledge. */
+#define ANLOGIC_FPGA_RESET_PIN       GPIO_PIN_14
+#define ANLOGIC_FPGA_DATA_PIN        GPIO_PIN_15
+#define ANLOGIC_FPGA_ACK_PIN         GPIO_PIN_0
+#endif
+
 typedef void (*pFunction)(void);
 
 /* Bootloader update state */
@@ -93,7 +133,7 @@ uint32_t flash_page_size    = 0;
 uint32_t flash_end_address  = 0;
 unsigned char flash_info_ok = 0;
 
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 /* FPGA update state */
 typedef struct
 {
@@ -102,10 +142,15 @@ typedef struct
     unsigned char up_cmd;
     uint32_t size_t;
     uint32_t block_size_t;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+    uint32_t expected_packet;
+#endif
 } spi_w;
 
 spi_w spi_w_handle;
+#endif
 
+#if BOOTLOADER_ENABLE_GOWIN_FPGA
 typedef enum
 {
     TEST_LOGIC_RESET,
@@ -141,11 +186,19 @@ typedef enum
 #endif
 
 /* Private function declarations */
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 void delay_us(uint32_t delay_us);
-void my_gpio_init(void);
 void fpga_update_task(void);
+#endif
+#if BOOTLOADER_ENABLE_GOWIN_FPGA
+void my_gpio_init(void);
 void program_internal_flash(uint16_t cnt_num);
+#endif
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+static void anlogic_gpio_init(void);
+static unsigned char anlogic_flash_erase_region(void);
+static unsigned char anlogic_flash_program_packet(void);
+static unsigned char anlogic_fpga_reload(void);
 #endif
 static void boot_uart_poll_mcu(void);
 static void uart_data_handle(boot_uart_context_t *uart);
@@ -273,7 +326,7 @@ unsigned char WriteFlashData(uint32_t Addr, unsigned char *data, uint16_t len)
     return 1;
 }
 
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 void delay_us(uint32_t delay_us)
 {
     volatile unsigned int num;
@@ -342,7 +395,7 @@ void poweron_self_check(void)
     {
         return;
     }
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
     if(data == 0x0055)
     {
         return;
@@ -360,6 +413,10 @@ void poweron_self_check(void)
         }
     }
 
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+    anlogic_gpio_init();
+    (void)anlogic_fpga_reload();
+#endif
     poweron_to_app();
     need_to_upgrade = 1;
 }
@@ -652,7 +709,7 @@ static void boot_uart_poll_mcu(void)
     }
 }
 
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 uint16_t modbus_crc(unsigned char *data, uint16_t len)
 {
     uint16_t crc = 0xffff;
@@ -724,6 +781,9 @@ static void CMD_40_handle(boot_uart_context_t *uart)
     if((crc_temp != ((uint16_t)uart_buf[length - 2] * 256 +
                      uart_buf[length - 1])) || (uart_buf[0] != 0xfa))
     {
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+        spi_w_handle.up_cmd = 0xff;
+#endif
         tx_buf[h++] = 0xfa;
         tx_buf[h++] = 0xff;
         tx_buf[h++] = 0xff;
@@ -748,6 +808,9 @@ static void CMD_40_handle(boot_uart_context_t *uart)
         else
         {
             tx_buf[h++] = 0x65;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            spi_w_handle.up_cmd = 0xff;
+#endif
         }
         fpga_send(uart, tx_buf, h);
         return;
@@ -759,12 +822,27 @@ static void CMD_40_handle(boot_uart_context_t *uart)
         spi_w_handle.size_t = ((uint32_t)uart_buf[2] << 16) +
                               ((uint32_t)uart_buf[3] << 8) +
                               uart_buf[4];
-        tx_buf[h++] = (spi_w_handle.size_t == 0) ? 0x65 : 0x73;
-        fpga_send(uart, tx_buf, h);
-        if(spi_w_handle.size_t != 0)
+        if((spi_w_handle.size_t == 0U)
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+           || (spi_w_handle.size_t >
+               (ANLOGIC_FLASH_MAX_SIZE / spi_w_handle.block_size_t))
+#endif
+          )
         {
+            tx_buf[h++] = 0x65;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            spi_w_handle.up_cmd = 0xff;
+#endif
+        }
+        else
+        {
+            tx_buf[h++] = 0x73;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            spi_w_handle.expected_packet = 1U;
+#endif
             spi_w_handle.up_cmd = 1;
         }
+        fpga_send(uart, tx_buf, h);
         return;
     }
 
@@ -775,10 +853,19 @@ static void CMD_40_handle(boot_uart_context_t *uart)
                             ((uint32_t)uart_buf[2] << 16) +
                             ((uint32_t)uart_buf[3] << 8) +
                             uart_buf[4];
-        if((spi_w_handle.addr == 0) ||
-           (spi_w_handle.addr > spi_w_handle.size_t))
+        if((spi_w_handle.addr == 0U) ||
+           (spi_w_handle.addr > spi_w_handle.size_t)
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+           || (spi_w_handle.addr != spi_w_handle.expected_packet)
+           || (((spi_w_handle.addr - 1U) * spi_w_handle.block_size_t) >
+               (ANLOGIC_FLASH_MAX_SIZE - spi_w_handle.block_size_t))
+#endif
+          )
         {
             tx_buf[h++] = 0x65;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            spi_w_handle.up_cmd = 0xff;
+#endif
         }
         else
         {
@@ -800,6 +887,10 @@ void fpga_update_task(void)
 
     spi_w_handle.up_cmd = 0;
     spi_w_handle.block_size_t = 0;
+    spi_w_handle.size_t = 0U;
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+    spi_w_handle.expected_packet = 1U;
+#endif
     active_uart = NULL;
 
     while(1)
@@ -820,11 +911,24 @@ void fpga_update_task(void)
 
         if(spi_w_handle.up_cmd == 1)
         {
+#if BOOTLOADER_ENABLE_GOWIN_FPGA
             program_internal_flash(0);
             spi_w_handle.up_cmd = 0;
+#elif BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            if(anlogic_flash_erase_region() != 0U)
+            {
+                spi_w_handle.expected_packet = 1U;
+                spi_w_handle.up_cmd = 0;
+            }
+            else
+            {
+                spi_w_handle.up_cmd = 0xff;
+            }
+#endif
         }
         else if(spi_w_handle.up_cmd == 2)
         {
+#if BOOTLOADER_ENABLE_GOWIN_FPGA
             program_internal_flash((uint16_t)spi_w_handle.addr);
             if(spi_w_handle.addr == spi_w_handle.size_t)
             {
@@ -835,6 +939,36 @@ void fpga_update_task(void)
             {
                 spi_w_handle.up_cmd = 0;
             }
+#elif BOOTLOADER_ENABLE_ANLOGIC_FPGA
+            if(anlogic_flash_program_packet() == 0U)
+            {
+                spi_w_handle.up_cmd = 0xff;
+            }
+            else if(spi_w_handle.addr == spi_w_handle.size_t)
+            {
+                if(anlogic_fpga_reload() != 0U)
+                {
+                    set_BootLoader_flag();
+                    if(success_flag != FALSE)
+                    {
+                        HAL_NVIC_SystemReset();
+                    }
+                    else
+                    {
+                        spi_w_handle.up_cmd = 0xff;
+                    }
+                }
+                else
+                {
+                    spi_w_handle.up_cmd = 0xff;
+                }
+            }
+            else
+            {
+                spi_w_handle.expected_packet++;
+                spi_w_handle.up_cmd = 0;
+            }
+#endif
         }
     }
 }
@@ -855,10 +989,14 @@ static void uart_task(void)
     uint16_t data;
 
     data = *(uint16_t *)BOOT_ADDRESS;
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
     if(data == 0x0055)
     {
+#if BOOTLOADER_ENABLE_GOWIN_FPGA
         my_gpio_init();
+#elif BOOTLOADER_ENABLE_ANLOGIC_FPGA
+        anlogic_gpio_init();
+#endif
         fpga_update_task();
     }
 #endif
@@ -905,6 +1043,271 @@ void bsp_ota_handle(void)
     HAL_Delay(100);
     uart_task();
 }
+
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+static void anlogic_gpio_init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_AFIO_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    __HAL_AFIO_REMAP_PD01_ENABLE();
+
+    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_MOSI_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN | ANLOGIC_FPGA_DATA_PIN,
+                      GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin = ANLOGIC_FLASH_CS_PIN | ANLOGIC_FLASH_MOSI_PIN;
+    HAL_GPIO_Init(GPIOA, &gpio);
+
+    gpio.Pin = ANLOGIC_FLASH_SCK_PIN | ANLOGIC_FPGA_RESET_PIN |
+               ANLOGIC_FPGA_DATA_PIN;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Pin = ANLOGIC_FLASH_MISO_PIN;
+    HAL_GPIO_Init(GPIOB, &gpio);
+    gpio.Pin = ANLOGIC_FPGA_ACK_PIN;
+    HAL_GPIO_Init(GPIOD, &gpio);
+}
+
+static uint8_t anlogic_spi_transfer(uint8_t value)
+{
+    uint8_t bit;
+    uint8_t received;
+
+    received = 0U;
+    for(bit = 0U; bit < 8U; bit++)
+    {
+        HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_MOSI_PIN,
+                          ((value & 0x80U) != 0U) ? GPIO_PIN_SET :
+                                                   GPIO_PIN_RESET);
+        __NOP();
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        received = (uint8_t)(received << 1);
+        if(HAL_GPIO_ReadPin(GPIOB, ANLOGIC_FLASH_MISO_PIN) == GPIO_PIN_SET)
+        {
+            received |= 0x01U;
+        }
+        __NOP();
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        value = (uint8_t)(value << 1);
+    }
+
+    return received;
+}
+
+static void anlogic_flash_select(void)
+{
+    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_RESET);
+}
+
+static void anlogic_flash_deselect(void)
+{
+    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_SET);
+}
+
+static void anlogic_flash_send_address(uint32_t address)
+{
+    (void)anlogic_spi_transfer((uint8_t)(address >> 16));
+    (void)anlogic_spi_transfer((uint8_t)(address >> 8));
+    (void)anlogic_spi_transfer((uint8_t)address);
+}
+
+static void anlogic_flash_write_enable(void)
+{
+    anlogic_flash_select();
+    (void)anlogic_spi_transfer(ANLOGIC_W25Q_WRITE_ENABLE);
+    anlogic_flash_deselect();
+}
+
+static uint8_t anlogic_flash_read_status(void)
+{
+    uint8_t status;
+
+    anlogic_flash_select();
+    (void)anlogic_spi_transfer(ANLOGIC_W25Q_READ_STATUS);
+    status = anlogic_spi_transfer(0xFFU);
+    anlogic_flash_deselect();
+    return status;
+}
+
+static unsigned char anlogic_flash_wait_ready(uint32_t timeout_ms)
+{
+    uint32_t start_time;
+
+    start_time = HAL_GetTick();
+    while((anlogic_flash_read_status() & ANLOGIC_W25Q_STATUS_WIP) != 0U)
+    {
+        if((HAL_GetTick() - start_time) >= timeout_ms)
+        {
+            return 0U;
+        }
+    }
+
+    return 1U;
+}
+
+static unsigned char anlogic_flash_erase_block(uint32_t address)
+{
+    anlogic_flash_write_enable();
+    anlogic_flash_select();
+    (void)anlogic_spi_transfer(ANLOGIC_W25Q_BLOCK_ERASE_64K);
+    anlogic_flash_send_address(address);
+    anlogic_flash_deselect();
+    return anlogic_flash_wait_ready(ANLOGIC_BLOCK_TIMEOUT_MS);
+}
+
+static unsigned char anlogic_flash_erase_region(void)
+{
+    uint8_t block;
+
+    for(block = 0U; block < ANLOGIC_FLASH_BLOCK_COUNT; block++)
+    {
+        if(anlogic_flash_erase_block(ANLOGIC_FLASH_BASE_ADDRESS +
+             (uint32_t)block * ANLOGIC_FLASH_BLOCK_SIZE) == 0U)
+        {
+            return 0U;
+        }
+    }
+
+    return 1U;
+}
+
+static unsigned char anlogic_flash_program_page(uint32_t address,
+                                                 const uint8_t *data)
+{
+    uint16_t index;
+
+    anlogic_flash_write_enable();
+    anlogic_flash_select();
+    (void)anlogic_spi_transfer(ANLOGIC_W25Q_PAGE_PROGRAM);
+    anlogic_flash_send_address(address);
+    for(index = 0U; index < ANLOGIC_FLASH_PAGE_SIZE; index++)
+    {
+        (void)anlogic_spi_transfer(data[index]);
+    }
+    anlogic_flash_deselect();
+    return anlogic_flash_wait_ready(ANLOGIC_PAGE_TIMEOUT_MS);
+}
+
+static void anlogic_flash_read(uint32_t address, uint8_t *data,
+                               uint16_t length)
+{
+    uint16_t index;
+
+    anlogic_flash_select();
+    (void)anlogic_spi_transfer(ANLOGIC_W25Q_READ_DATA);
+    anlogic_flash_send_address(address);
+    for(index = 0U; index < length; index++)
+    {
+        data[index] = anlogic_spi_transfer(0xFFU);
+    }
+    anlogic_flash_deselect();
+}
+
+static unsigned char anlogic_flash_program_packet(void)
+{
+    uint8_t readback[ANLOGIC_FLASH_PAGE_SIZE];
+    uint16_t page_offset;
+    uint16_t index;
+    uint32_t address;
+
+    address = ANLOGIC_FLASH_BASE_ADDRESS +
+              (spi_w_handle.addr - 1U) * spi_w_handle.block_size_t;
+    for(page_offset = 0U; page_offset < spi_w_handle.block_size_t;
+        page_offset += ANLOGIC_FLASH_PAGE_SIZE)
+    {
+        if(anlogic_flash_program_page(address + page_offset,
+             &spi_w_handle.spi_data[page_offset]) == 0U)
+        {
+            return 0U;
+        }
+
+        anlogic_flash_read(address + page_offset, readback,
+                           ANLOGIC_FLASH_PAGE_SIZE);
+        for(index = 0U; index < ANLOGIC_FLASH_PAGE_SIZE; index++)
+        {
+            if(readback[index] != spi_w_handle.spi_data[page_offset + index])
+            {
+                return 0U;
+            }
+        }
+    }
+
+    return 1U;
+}
+
+static unsigned char anlogic_fpga_control_send(uint16_t address,
+                                                uint32_t data)
+{
+    uint8_t bit;
+    unsigned char acknowledged;
+
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_RESET);
+    delay_us(ANLOGIC_CONTROL_DELAY_US);
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+    delay_us(ANLOGIC_CONTROL_DELAY_US);
+
+    for(bit = 0U; bit < 32U; bit++)
+    {
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_DATA_PIN,
+                          ((data >> bit) & 1U) != 0U ? GPIO_PIN_SET :
+                                                      GPIO_PIN_RESET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+    }
+
+    for(bit = 0U; bit < 16U; bit++)
+    {
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_DATA_PIN,
+                          ((address >> bit) & 1U) != 0U ? GPIO_PIN_SET :
+                                                         GPIO_PIN_RESET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        delay_us(ANLOGIC_CONTROL_DELAY_US);
+    }
+
+    acknowledged = (HAL_GPIO_ReadPin(GPIOD, ANLOGIC_FPGA_ACK_PIN) ==
+                    GPIO_PIN_SET) ? 1U : 0U;
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_RESET);
+    delay_us(ANLOGIC_CONTROL_DELAY_US);
+    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+    delay_us(ANLOGIC_CONTROL_DELAY_US);
+    return acknowledged;
+}
+
+static unsigned char anlogic_fpga_reload(void)
+{
+    uint8_t retry;
+
+    for(retry = 0U; retry < ANLOGIC_RELOAD_RETRY_COUNT; retry++)
+    {
+        if((anlogic_fpga_control_send(0xFFF2U, 0x0CU) != 0U) &&
+           (anlogic_fpga_control_send(0xFFF1U, 0x00U) != 0U))
+        {
+            return 1U;
+        }
+    }
+
+    return 0U;
+}
+#endif
 
 #if BOOTLOADER_ENABLE_GOWIN_FPGA
 void jtag_clock(unsigned int clocks)

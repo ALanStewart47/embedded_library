@@ -29,8 +29,30 @@ if (Test-Path $configPath) {
         Assert-True ($config -match "BOOTLOADER_ENABLE_USART$port") "USART$port enable macro is missing."
     }
     Assert-True ($config -match 'BOOTLOADER_ENABLE_GOWIN_FPGA\s+0') 'Gowin FPGA support must default to disabled.'
+    Assert-True ($config -match 'BOOTLOADER_ENABLE_ANLOGIC_FPGA\s+0') 'Anlogic FPGA support must default to disabled.'
+    Assert-True ($config -match '(?s)#if\s+\(?BOOTLOADER_ENABLE_GOWIN_FPGA\)?\s*&&\s*\\?\s*\(?BOOTLOADER_ENABLE_ANLOGIC_FPGA\)?.*?#error') 'Gowin and Anlogic FPGA support must be compile-time exclusive.'
     Assert-True ($config -match '#error[\s\S]*USART') 'Disabling all USART ports must produce a compile-time error.'
 }
+
+Assert-True ($bootHeader -match '(?s)#if\s+\(?BOOTLOADER_ENABLE_GOWIN_FPGA\s*\|\|\s*BOOTLOADER_ENABLE_ANLOGIC_FPGA\)?.*?#define\s+BUFFER_SIZE\s+2148') 'Either FPGA backend must select a 2148-byte UART buffer.'
+Assert-True ($bootHeader -match '#define\s+APPLICATION_ADDRESS_A\s+0x08003800U') 'Application address must remain 0x08003800.'
+Assert-True ($bootHeader -match '#define\s+BOOT_ADDRESS\s+0x08003400U') 'Boot flag address must remain 0x08003400.'
+
+Assert-True ($bootSource -match '#if\s+BOOTLOADER_ENABLE_ANLOGIC_FPGA') 'Anlogic implementation must be compile-time guarded.'
+Assert-True ($bootSource -match '#if\s+BOOTLOADER_ENABLE_GOWIN_FPGA') 'Gowin implementation guard must be preserved.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BASE_ADDRESS\s+0x000C0000U') 'Anlogic flash region must start at 0x000C0000.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BLOCK_COUNT\s+12U') 'Anlogic flash region must contain twelve blocks.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BLOCK_SIZE\s+\(64U\s*\*\s*1024U\)') 'Anlogic flash erase block must be 64 KiB.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_CONTROL_DELAY_US\s+3U') 'Anlogic FPGA control delay must default to 3 us.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_PAGE_TIMEOUT_MS\s+100U') 'Anlogic page-program timeout must default to 100 ms.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_BLOCK_TIMEOUT_MS\s+5000U') 'Anlogic block-erase timeout must default to 5 seconds.'
+Assert-True ($bootSource -match '#define\s+ANLOGIC_RELOAD_RETRY_COUNT\s+3U') 'Anlogic reload command retry count must default to three.'
+Assert-True ($bootSource -match 'GPIO_PIN_0[\s\S]*GPIO_PIN_1[\s\S]*GPIO_PIN_13[\s\S]*GPIO_PIN_9[\s\S]*GPIO_PIN_14[\s\S]*GPIO_PIN_15[\s\S]*GPIO_PIN_0') 'Anlogic backend must define the approved CS/MOSI/SCK/MISO/reset/data/ack pins.'
+Assert-True ($bootSource -match '0xFFF2U?[\s\S]*0x0CU?[\s\S]*0xFFF1U?[\s\S]*0x00U?') 'Anlogic reload must select image 0x0C and issue reset.'
+Assert-True ($bootSource -match 'ANLOGIC_FLASH_MAX_SIZE') 'Anlogic update length must be bounded by the 768 KiB region.'
+Assert-True ($bootSource -match 'ANLOGIC_W25Q_PAGE_PROGRAM') 'Anlogic backend must use W25Q page-program commands.'
+Assert-True ($bootSource -match 'anlogic_flash_read[\s\S]*spi_w_handle\.spi_data') 'Anlogic packets must be read back for verification.'
+Assert-True ($bootSource -match 'spi_w_handle\.up_cmd\s*=\s*0xff') 'Anlogic failures must enter queryable failure state 0xff.'
 
 foreach ($port in 1..3) {
     Assert-True ($mainSource -match "(?s)#if\s+BOOTLOADER_ENABLE_USART$port.*?MX_USART${port}_UART_Init\(\).*?#endif") "USART$port initialization is not compile-time gated."
@@ -62,4 +84,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Host 'Static checks passed: 25 assertions'
+Write-Host 'Static checks passed: 41 assertions'

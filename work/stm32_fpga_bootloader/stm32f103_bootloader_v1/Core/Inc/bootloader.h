@@ -22,7 +22,7 @@
  * @note 
  *       1 tab == 4 spaces!
  *       Configure enabled UART ports in bootloader_config.h.
- *       Set BOOTLOADER_ENABLE_GOWIN_FPGA to 1 to compile Gowin FPGA upgrade.
+ *       Enable one FPGA backend in bootloader_config.h when required.
  *       Default 0 is MCU-only and fits the current 12 KB Bootloader ROM.
  *       FPGA=1 currently overflows 0x3000; enlarge Bootloader IROM first.
  *       The MDK Target preprocessor can also define it to override the default.
@@ -40,7 +40,7 @@ extern "C" {
 #include <stdint.h>
 //******************************** Includes *********************************//
 
-#if BOOTLOADER_ENABLE_GOWIN_FPGA
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 #define BUFFER_SIZE                2148
 #else
 #define BUFFER_SIZE                272

@@ -23,4 +23,13 @@
 #define BOOTLOADER_ENABLE_GOWIN_FPGA    0
 #endif
 
+#ifndef BOOTLOADER_ENABLE_ANLOGIC_FPGA
+#define BOOTLOADER_ENABLE_ANLOGIC_FPGA  0
+#endif
+
+#if (BOOTLOADER_ENABLE_GOWIN_FPGA) && \
+    (BOOTLOADER_ENABLE_ANLOGIC_FPGA)
+#error "Gowin and Anlogic FPGA backends are mutually exclusive"
+#endif
+
 #endif /* __BOOTLOADER_CONFIG_H */
