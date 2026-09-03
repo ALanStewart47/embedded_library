@@ -44,16 +44,14 @@ Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BASE_ADDRESS\s+0x000C00
 Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BLOCK_COUNT\s+12U') 'Anlogic flash region must contain twelve blocks.'
 Assert-True ($bootSource -match '#define\s+ANLOGIC_FLASH_BLOCK_SIZE\s+\(64U\s*\*\s*1024U\)') 'Anlogic flash erase block must be 64 KiB.'
 Assert-True ($bootSource -match '#define\s+ANLOGIC_CONTROL_DELAY_US\s+3U') 'Anlogic FPGA control delay must default to 3 us.'
-Assert-True ($bootSource -match '#define\s+ANLOGIC_PAGE_TIMEOUT_MS\s+100U') 'Anlogic page-program timeout must default to 100 ms.'
-Assert-True ($bootSource -match '#define\s+ANLOGIC_BLOCK_TIMEOUT_MS\s+5000U') 'Anlogic block-erase timeout must default to 5 seconds.'
-Assert-True ($bootSource -match '#define\s+ANLOGIC_RELOAD_RETRY_COUNT\s+3U') 'Anlogic reload command retry count must default to three.'
+Assert-True ($bootSource -notmatch 'ANLOGIC_(PAGE|BLOCK)_TIMEOUT_MS') 'Anlogic W25Q operations must not add timeout behavior absent from Boot_STM32_anlu.'
+Assert-True ($bootSource -notmatch 'ANLOGIC_RELOAD_RETRY_COUNT') 'Anlogic FPGA reload must not add retry behavior absent from Boot_STM32_anlu.'
 Assert-True ($bootSource -match 'GPIO_PIN_0[\s\S]*GPIO_PIN_1[\s\S]*GPIO_PIN_13[\s\S]*GPIO_PIN_9[\s\S]*GPIO_PIN_14[\s\S]*GPIO_PIN_15[\s\S]*GPIO_PIN_0') 'Anlogic backend must define the approved CS/MOSI/SCK/MISO/reset/data/ack pins.'
 Assert-True ($bootSource -match '0xFFF2U?[\s\S]*0x0CU?[\s\S]*0xFFF1U?[\s\S]*0x00U?') 'Anlogic reload must select image 0x0C and issue reset.'
 Assert-True ($bootSource -match '(?s)for\(bit\s*=\s*0U;\s*bit\s*<\s*16U;\s*bit\+\+\).*?\n\s*\}\s*\r?\n\s*delay_us\(ANLOGIC_CONTROL_DELAY_US\);\s*\r?\n\s*acknowledged\s*=') 'Anlogic control frames must settle after the final address clock before sampling ACK.'
 Assert-True ($bootSource -match 'ANLOGIC_FLASH_MAX_SIZE') 'Anlogic update length must be bounded by the 768 KiB region.'
 Assert-True ($bootSource -match 'ANLOGIC_W25Q_PAGE_PROGRAM') 'Anlogic backend must use W25Q page-program commands.'
-Assert-True ($bootSource -match 'anlogic_flash_read[\s\S]*spi_w_handle\.spi_data') 'Anlogic packets must be read back for verification.'
-Assert-True ($bootSource -match 'spi_w_handle\.up_cmd\s*=\s*0xff') 'Anlogic failures must enter queryable failure state 0xff.'
+Assert-True ($bootSource -notmatch 'static\s+void\s+anlogic_flash_read\s*\(') 'Anlogic packet writes must not add the disabled source readback verification pass.'
 
 foreach ($port in 1..3) {
     Assert-True ($mainSource -match "(?s)#if\s+BOOTLOADER_ENABLE_USART$port.*?MX_USART${port}_UART_Init\(\).*?#endif") "USART$port initialization is not compile-time gated."

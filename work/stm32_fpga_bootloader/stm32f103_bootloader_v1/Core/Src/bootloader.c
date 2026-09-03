@@ -44,15 +44,6 @@
 #ifndef ANLOGIC_CONTROL_DELAY_US
 #define ANLOGIC_CONTROL_DELAY_US     3U
 #endif
-#ifndef ANLOGIC_PAGE_TIMEOUT_MS
-#define ANLOGIC_PAGE_TIMEOUT_MS      100U
-#endif
-#ifndef ANLOGIC_BLOCK_TIMEOUT_MS
-#define ANLOGIC_BLOCK_TIMEOUT_MS     5000U
-#endif
-#ifndef ANLOGIC_RELOAD_RETRY_COUNT
-#define ANLOGIC_RELOAD_RETRY_COUNT   3U
-#endif
 
 #define ANLOGIC_W25Q_WRITE_ENABLE    0x06U
 #define ANLOGIC_W25Q_READ_DATA       0x03U
@@ -217,9 +208,9 @@ void program_internal_flash(uint16_t cnt_num);
 #endif
 #if BOOTLOADER_ENABLE_ANLOGIC_FPGA
 static void anlogic_gpio_init(void);
-static unsigned char anlogic_flash_erase_region(void);
-static unsigned char anlogic_flash_program_packet(void);
-static unsigned char anlogic_fpga_reload(void);
+static void anlogic_flash_erase_region(void);
+static void anlogic_flash_program_packet(void);
+static void anlogic_fpga_reload(void);
 #endif
 static void boot_uart_poll_mcu(void);
 static void uart_data_handle(boot_uart_context_t *uart);
@@ -949,15 +940,9 @@ void fpga_update_task(void)
             program_internal_flash(0);
             spi_w_handle.up_cmd = 0;
 #elif BOOTLOADER_ENABLE_ANLOGIC_FPGA
-            if(anlogic_flash_erase_region() != 0U)
-            {
-                spi_w_handle.expected_packet = 1U;
-                spi_w_handle.up_cmd = 0;
-            }
-            else
-            {
-                spi_w_handle.up_cmd = 0xff;
-            }
+            anlogic_flash_erase_region();
+            spi_w_handle.expected_packet = 1U;
+            spi_w_handle.up_cmd = 0;
 #endif
         }
         else if(spi_w_handle.up_cmd == 2)
@@ -974,28 +959,17 @@ void fpga_update_task(void)
                 spi_w_handle.up_cmd = 0;
             }
 #elif BOOTLOADER_ENABLE_ANLOGIC_FPGA
-            if(anlogic_flash_program_packet() == 0U)
+            anlogic_flash_program_packet();
+            spi_w_handle.up_cmd = 0;
+            if((spi_w_handle.addr == spi_w_handle.size_t) &&
+               (spi_w_handle.size_t != 0U))
             {
-                spi_w_handle.up_cmd = 0xff;
-            }
-            else if(spi_w_handle.addr == spi_w_handle.size_t)
-            {
-                if(anlogic_fpga_reload() != 0U)
-                {
-                    set_BootLoader_flag();
-                    if(success_flag != FALSE)
-                    {
-                        HAL_NVIC_SystemReset();
-                    }
-                    else
-                    {
-                        spi_w_handle.up_cmd = 0xff;
-                    }
-                }
-                else
-                {
-                    spi_w_handle.up_cmd = 0xff;
-                }
+                anlogic_fpga_reload();
+                set_BootLoader_flag();
+                delay_us(300U);
+                delay_us(500U);
+                __set_FAULTMASK(1U);
+                HAL_NVIC_SystemReset();
             }
             else
             {
@@ -1180,50 +1154,35 @@ static uint8_t anlogic_flash_read_status(void)
     return status;
 }
 
-static unsigned char anlogic_flash_wait_ready(uint32_t timeout_ms)
+static void anlogic_flash_wait_ready(void)
 {
-    uint32_t start_time;
-
-    start_time = HAL_GetTick();
     while((anlogic_flash_read_status() & ANLOGIC_W25Q_STATUS_WIP) != 0U)
     {
-        if((HAL_GetTick() - start_time) >= timeout_ms)
-        {
-            return 0U;
-        }
     }
-
-    return 1U;
 }
 
-static unsigned char anlogic_flash_erase_block(uint32_t address)
+static void anlogic_flash_erase_block(uint32_t address)
 {
     anlogic_flash_write_enable();
     anlogic_flash_select();
     (void)anlogic_spi_transfer(ANLOGIC_W25Q_BLOCK_ERASE_64K);
     anlogic_flash_send_address(address);
     anlogic_flash_deselect();
-    return anlogic_flash_wait_ready(ANLOGIC_BLOCK_TIMEOUT_MS);
+    anlogic_flash_wait_ready();
 }
 
-static unsigned char anlogic_flash_erase_region(void)
+static void anlogic_flash_erase_region(void)
 {
     uint8_t block;
 
     for(block = 0U; block < ANLOGIC_FLASH_BLOCK_COUNT; block++)
     {
-        if(anlogic_flash_erase_block(ANLOGIC_FLASH_BASE_ADDRESS +
-             (uint32_t)block * ANLOGIC_FLASH_BLOCK_SIZE) == 0U)
-        {
-            return 0U;
-        }
+        anlogic_flash_erase_block(ANLOGIC_FLASH_BASE_ADDRESS +
+                                  (uint32_t)block * ANLOGIC_FLASH_BLOCK_SIZE);
     }
-
-    return 1U;
 }
 
-static unsigned char anlogic_flash_program_page(uint32_t address,
-                                                 const uint8_t *data)
+static void anlogic_flash_program_page(uint32_t address, const uint8_t *data)
 {
     uint16_t index;
 
@@ -1236,29 +1195,12 @@ static unsigned char anlogic_flash_program_page(uint32_t address,
         (void)anlogic_spi_transfer(data[index]);
     }
     anlogic_flash_deselect();
-    return anlogic_flash_wait_ready(ANLOGIC_PAGE_TIMEOUT_MS);
+    anlogic_flash_wait_ready();
 }
 
-static void anlogic_flash_read(uint32_t address, uint8_t *data,
-                               uint16_t length)
+static void anlogic_flash_program_packet(void)
 {
-    uint16_t index;
-
-    anlogic_flash_select();
-    (void)anlogic_spi_transfer(ANLOGIC_W25Q_READ_DATA);
-    anlogic_flash_send_address(address);
-    for(index = 0U; index < length; index++)
-    {
-        data[index] = anlogic_spi_transfer(0xFFU);
-    }
-    anlogic_flash_deselect();
-}
-
-static unsigned char anlogic_flash_program_packet(void)
-{
-    uint8_t readback[ANLOGIC_FLASH_PAGE_SIZE];
     uint16_t page_offset;
-    uint16_t index;
     uint32_t address;
 
     address = ANLOGIC_FLASH_BASE_ADDRESS +
@@ -1266,24 +1208,9 @@ static unsigned char anlogic_flash_program_packet(void)
     for(page_offset = 0U; page_offset < spi_w_handle.block_size_t;
         page_offset += ANLOGIC_FLASH_PAGE_SIZE)
     {
-        if(anlogic_flash_program_page(address + page_offset,
-             &spi_w_handle.spi_data[page_offset]) == 0U)
-        {
-            return 0U;
-        }
-
-        anlogic_flash_read(address + page_offset, readback,
-                           ANLOGIC_FLASH_PAGE_SIZE);
-        for(index = 0U; index < ANLOGIC_FLASH_PAGE_SIZE; index++)
-        {
-            if(readback[index] != spi_w_handle.spi_data[page_offset + index])
-            {
-                return 0U;
-            }
-        }
+        anlogic_flash_program_page(address + page_offset,
+                                   &spi_w_handle.spi_data[page_offset]);
     }
-
-    return 1U;
 }
 
 static unsigned char anlogic_fpga_control_send(uint16_t address,
@@ -1341,20 +1268,10 @@ static unsigned char anlogic_fpga_control_send(uint16_t address,
     return acknowledged;
 }
 
-static unsigned char anlogic_fpga_reload(void)
+static void anlogic_fpga_reload(void)
 {
-    uint8_t retry;
-
-    for(retry = 0U; retry < ANLOGIC_RELOAD_RETRY_COUNT; retry++)
-    {
-        if((anlogic_fpga_control_send(0xFFF2U, 0x0CU) != 0U) &&
-           (anlogic_fpga_control_send(0xFFF1U, 0x00U) != 0U))
-        {
-            return 1U;
-        }
-    }
-
-    return 0U;
+    (void)anlogic_fpga_control_send(0xFFF2U, 0x0CU);
+    (void)anlogic_fpga_control_send(0xFFF1U, 0x00U);
 }
 #endif
 
