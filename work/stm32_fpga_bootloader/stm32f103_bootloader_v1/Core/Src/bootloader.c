@@ -70,6 +70,26 @@
 #define ANLOGIC_FPGA_RESET_PIN       GPIO_PIN_14
 #define ANLOGIC_FPGA_DATA_PIN        GPIO_PIN_15
 #define ANLOGIC_FPGA_ACK_PIN         GPIO_PIN_0
+
+#define ANLOGIC_FLASH_CS_HIGH()      (GPIOA->BSRR = ANLOGIC_FLASH_CS_PIN)
+#define ANLOGIC_FLASH_CS_LOW()       (GPIOA->BSRR = \
+                                      (uint32_t)ANLOGIC_FLASH_CS_PIN << 16)
+#define ANLOGIC_FLASH_MOSI_HIGH()    (GPIOA->BSRR = ANLOGIC_FLASH_MOSI_PIN)
+#define ANLOGIC_FLASH_MOSI_LOW()     (GPIOA->BSRR = \
+                                      (uint32_t)ANLOGIC_FLASH_MOSI_PIN << 16)
+#define ANLOGIC_CLOCK_HIGH()         (GPIOC->BSRR = ANLOGIC_FLASH_SCK_PIN)
+#define ANLOGIC_CLOCK_LOW()          (GPIOC->BSRR = \
+                                      (uint32_t)ANLOGIC_FLASH_SCK_PIN << 16)
+#define ANLOGIC_FPGA_RESET_HIGH()    (GPIOC->BSRR = ANLOGIC_FPGA_RESET_PIN)
+#define ANLOGIC_FPGA_RESET_LOW()     (GPIOC->BSRR = \
+                                      (uint32_t)ANLOGIC_FPGA_RESET_PIN << 16)
+#define ANLOGIC_FPGA_DATA_HIGH()     (GPIOC->BSRR = ANLOGIC_FPGA_DATA_PIN)
+#define ANLOGIC_FPGA_DATA_LOW()      (GPIOC->BSRR = \
+                                      (uint32_t)ANLOGIC_FPGA_DATA_PIN << 16)
+#define ANLOGIC_FLASH_MISO_READ()    (((GPIOB->IDR & \
+                                      ANLOGIC_FLASH_MISO_PIN) != 0U) ? 1U : 0U)
+#define ANLOGIC_FPGA_ACK_READ()      (((GPIOD->IDR & \
+                                      ANLOGIC_FPGA_ACK_PIN) != 0U) ? 1U : 0U)
 #endif
 
 typedef void (*pFunction)(void);
@@ -1056,11 +1076,11 @@ static void anlogic_gpio_init(void)
     __HAL_RCC_GPIOD_CLK_ENABLE();
     __HAL_AFIO_REMAP_PD01_ENABLE();
 
-    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_MOSI_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN | ANLOGIC_FPGA_DATA_PIN,
-                      GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+    ANLOGIC_FLASH_CS_HIGH();
+    ANLOGIC_FLASH_MOSI_LOW();
+    ANLOGIC_CLOCK_LOW();
+    ANLOGIC_FPGA_DATA_LOW();
+    ANLOGIC_FPGA_RESET_HIGH();
 
     gpio.Mode = GPIO_MODE_OUTPUT_PP;
     gpio.Pull = GPIO_NOPULL;
@@ -1088,18 +1108,23 @@ static uint8_t anlogic_spi_transfer(uint8_t value)
     received = 0U;
     for(bit = 0U; bit < 8U; bit++)
     {
-        HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_MOSI_PIN,
-                          ((value & 0x80U) != 0U) ? GPIO_PIN_SET :
-                                                   GPIO_PIN_RESET);
+        if((value & 0x80U) != 0U)
+        {
+            ANLOGIC_FLASH_MOSI_HIGH();
+        }
+        else
+        {
+            ANLOGIC_FLASH_MOSI_LOW();
+        }
         __NOP();
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        ANLOGIC_CLOCK_HIGH();
         received = (uint8_t)(received << 1);
-        if(HAL_GPIO_ReadPin(GPIOB, ANLOGIC_FLASH_MISO_PIN) == GPIO_PIN_SET)
+        if(ANLOGIC_FLASH_MISO_READ() != 0U)
         {
             received |= 0x01U;
         }
         __NOP();
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        ANLOGIC_CLOCK_LOW();
         value = (uint8_t)(value << 1);
     }
 
@@ -1108,12 +1133,12 @@ static uint8_t anlogic_spi_transfer(uint8_t value)
 
 static void anlogic_flash_select(void)
 {
-    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_RESET);
+    ANLOGIC_FLASH_CS_LOW();
 }
 
 static void anlogic_flash_deselect(void)
 {
-    HAL_GPIO_WritePin(GPIOA, ANLOGIC_FLASH_CS_PIN, GPIO_PIN_SET);
+    ANLOGIC_FLASH_CS_HIGH();
 }
 
 static void anlogic_flash_send_address(uint32_t address)
@@ -1253,41 +1278,51 @@ static unsigned char anlogic_fpga_control_send(uint16_t address,
     uint8_t bit;
     unsigned char acknowledged;
 
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_RESET);
+    ANLOGIC_CLOCK_LOW();
+    ANLOGIC_FPGA_RESET_LOW();
     delay_us(ANLOGIC_CONTROL_DELAY_US);
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+    ANLOGIC_FPGA_RESET_HIGH();
     delay_us(ANLOGIC_CONTROL_DELAY_US);
 
     for(bit = 0U; bit < 32U; bit++)
     {
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_DATA_PIN,
-                          ((data >> bit) & 1U) != 0U ? GPIO_PIN_SET :
-                                                      GPIO_PIN_RESET);
+        if(((data >> bit) & 1U) != 0U)
+        {
+            ANLOGIC_FPGA_DATA_HIGH();
+        }
+        else
+        {
+            ANLOGIC_FPGA_DATA_LOW();
+        }
         delay_us(ANLOGIC_CONTROL_DELAY_US);
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        ANLOGIC_CLOCK_HIGH();
         delay_us(ANLOGIC_CONTROL_DELAY_US);
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        ANLOGIC_CLOCK_LOW();
         delay_us(ANLOGIC_CONTROL_DELAY_US);
     }
 
     for(bit = 0U; bit < 16U; bit++)
     {
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_DATA_PIN,
-                          ((address >> bit) & 1U) != 0U ? GPIO_PIN_SET :
-                                                         GPIO_PIN_RESET);
+        if(((address >> bit) & 1U) != 0U)
+        {
+            ANLOGIC_FPGA_DATA_HIGH();
+        }
+        else
+        {
+            ANLOGIC_FPGA_DATA_LOW();
+        }
         delay_us(ANLOGIC_CONTROL_DELAY_US);
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_SET);
+        ANLOGIC_CLOCK_HIGH();
         delay_us(ANLOGIC_CONTROL_DELAY_US);
-        HAL_GPIO_WritePin(GPIOC, ANLOGIC_FLASH_SCK_PIN, GPIO_PIN_RESET);
+        ANLOGIC_CLOCK_LOW();
         delay_us(ANLOGIC_CONTROL_DELAY_US);
     }
 
-    acknowledged = (HAL_GPIO_ReadPin(GPIOD, ANLOGIC_FPGA_ACK_PIN) ==
-                    GPIO_PIN_SET) ? 1U : 0U;
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_RESET);
     delay_us(ANLOGIC_CONTROL_DELAY_US);
-    HAL_GPIO_WritePin(GPIOC, ANLOGIC_FPGA_RESET_PIN, GPIO_PIN_SET);
+    acknowledged = ANLOGIC_FPGA_ACK_READ();
+    ANLOGIC_FPGA_RESET_LOW();
+    delay_us(ANLOGIC_CONTROL_DELAY_US);
+    ANLOGIC_FPGA_RESET_HIGH();
     delay_us(ANLOGIC_CONTROL_DELAY_US);
     return acknowledged;
 }

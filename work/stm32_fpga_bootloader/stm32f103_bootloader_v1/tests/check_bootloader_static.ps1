@@ -49,6 +49,7 @@ Assert-True ($bootSource -match '#define\s+ANLOGIC_BLOCK_TIMEOUT_MS\s+5000U') 'A
 Assert-True ($bootSource -match '#define\s+ANLOGIC_RELOAD_RETRY_COUNT\s+3U') 'Anlogic reload command retry count must default to three.'
 Assert-True ($bootSource -match 'GPIO_PIN_0[\s\S]*GPIO_PIN_1[\s\S]*GPIO_PIN_13[\s\S]*GPIO_PIN_9[\s\S]*GPIO_PIN_14[\s\S]*GPIO_PIN_15[\s\S]*GPIO_PIN_0') 'Anlogic backend must define the approved CS/MOSI/SCK/MISO/reset/data/ack pins.'
 Assert-True ($bootSource -match '0xFFF2U?[\s\S]*0x0CU?[\s\S]*0xFFF1U?[\s\S]*0x00U?') 'Anlogic reload must select image 0x0C and issue reset.'
+Assert-True ($bootSource -match '(?s)for\(bit\s*=\s*0U;\s*bit\s*<\s*16U;\s*bit\+\+\).*?\n\s*\}\s*\r?\n\s*delay_us\(ANLOGIC_CONTROL_DELAY_US\);\s*\r?\n\s*acknowledged\s*=') 'Anlogic control frames must settle after the final address clock before sampling ACK.'
 Assert-True ($bootSource -match 'ANLOGIC_FLASH_MAX_SIZE') 'Anlogic update length must be bounded by the 768 KiB region.'
 Assert-True ($bootSource -match 'ANLOGIC_W25Q_PAGE_PROGRAM') 'Anlogic backend must use W25Q page-program commands.'
 Assert-True ($bootSource -match 'anlogic_flash_read[\s\S]*spi_w_handle\.spi_data') 'Anlogic packets must be read back for verification.'
@@ -84,4 +85,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Host 'Static checks passed: 41 assertions'
+Write-Host 'Static checks passed: 42 assertions'
