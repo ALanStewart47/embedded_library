@@ -209,6 +209,7 @@ typedef enum
 #if (BOOTLOADER_ENABLE_GOWIN_FPGA || BOOTLOADER_ENABLE_ANLOGIC_FPGA)
 void delay_us(uint32_t delay_us);
 void fpga_update_task(void);
+static void CMD_40_handle(boot_uart_context_t *uart);
 #endif
 #if BOOTLOADER_ENABLE_GOWIN_FPGA
 void my_gpio_init(void);
@@ -531,6 +532,15 @@ void uart_interrupt_handle(uint8_t uart_number)
     if(remaining <= BUFFER_SIZE)
     {
         uart->rx_length = (uint16_t)(BUFFER_SIZE - remaining);
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+        if((((active_uart == NULL) || (active_uart == uart)) &&
+            (spi_w_handle.up_cmd != 0U)))
+        {
+            CMD_40_handle(uart);
+            boot_uart_release_frame(uart);
+            return;
+        }
+#endif
         uart->rx_ready = 1U;
     }
     else
@@ -775,8 +785,12 @@ static void CMD_40_handle(boot_uart_context_t *uart)
         return;
     }
 
-    if((uart_buf[0] == 0xfb) && (uart_buf[1] == 0xff) &&
-       (uart_buf[2] == 0xfb))
+    if(((uart_buf[0] == 0xfb) && (uart_buf[1] == 0xff) &&
+        (uart_buf[2] == 0xfb))
+#if BOOTLOADER_ENABLE_ANLOGIC_FPGA
+       || (spi_w_handle.up_cmd != 0U)
+#endif
+      )
     {
         tx_buf[h++] = 0xfb;
         if((spi_w_handle.up_cmd == 1) || (spi_w_handle.up_cmd == 2))
