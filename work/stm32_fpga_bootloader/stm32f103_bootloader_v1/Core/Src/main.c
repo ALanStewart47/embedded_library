@@ -89,13 +89,13 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-#if BOOTLOADER_ENABLE_USART1
+#if BL_ENABLE_USART1
   MX_USART1_UART_Init();
 #endif
-#if BOOTLOADER_ENABLE_USART2
+#if BL_ENABLE_USART2
   MX_USART2_UART_Init();
 #endif
-#if BOOTLOADER_ENABLE_USART3
+#if BL_ENABLE_USART3
   MX_USART3_UART_Init();
 #endif
   /* USER CODE BEGIN 2 */
