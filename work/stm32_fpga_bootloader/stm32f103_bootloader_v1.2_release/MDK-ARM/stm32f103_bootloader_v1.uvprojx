@@ -7,7 +7,7 @@
 
   <Targets>
     <Target>
-      <TargetName>stm32f103_bootloader_v1</TargetName>
+      <TargetName>stm32f103_bootloader_v1.2</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
       <pCCUsed>5060300::V5.06 update 3 (build 300)::ARMCC</pCCUsed>
@@ -83,7 +83,7 @@
             <RunUserProg1>0</RunUserProg1>
             <RunUserProg2>1</RunUserProg2>
             <UserProg1Name></UserProg1Name>
-            <UserProg2Name>D:\OneDrive\embedded_library\work\stm32_fpga_bootloader\stm32f103_bootloader_v1.2_release\Keil5_disp_size_bar_v0.3.exe</UserProg2Name>
+            <UserProg2Name>D:\OneDrive\embedded_library\work\stm32_fpga_bootloader\stm32f103_bootloader_v1.2_release\MDK-ARM\Keil5_disp_size_bar_v0.3.exe</UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
             <nStopA1X>0</nStopA1X>
@@ -748,7 +748,7 @@
       <component Cclass="CMSIS" Cgroup="CORE" Cvendor="ARM" Cversion="4.3.0" condition="CMSIS Core">
         <package name="CMSIS" schemaVersion="1.3" url="http://www.keil.com/pack/" vendor="ARM" version="4.5.0"/>
         <targetInfos>
-          <targetInfo name="stm32f103_bootloader_v1"/>
+          <targetInfo name="stm32f103_bootloader_v1.2"/>
         </targetInfos>
       </component>
     </components>
